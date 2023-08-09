@@ -429,13 +429,32 @@ def make_osqp_solver_and_options(use_dairlab_settings=False):
     # https://osqp.org/docs/interfaces/solver_settings.html#solver-settings
     solver_options_dict = dict(
         # See https://github.com/RobotLocomotion/drake/issues/18711
+        # rho=0.1,
+        # alpha=1.6,
         adaptive_rho=0,
+        # max_iter=1000,
+        # eps_abs=1e-2,
+        # eps_rel=1e-2,
+        # eps_prim_inf=1e-8,
+        # eps_dual_inf=1e-8,
+        # check_termination=50,
+        # delta=1e-6,
+        # polish=True,
+        # polish_refine_iter=100,
     )
     if use_dairlab_settings:
         # https://github.com/DAIRLab/dairlib/blob/0da42bc2/examples/Cassie/osc_run/osc_running_qp_settings.yaml
         solver_options_dict.update(
-            # rho=3.0,
-            rho=0.5,
+            rho=1e-2,
+            max_iter=10000,
+            eps_abs=1e-2,
+            eps_rel=1e-2,
+            eps_prim_inf=1e-3,
+            eps_dual_inf=1e-3,
+            check_termination=200,
+            delta=1e-6,
+            polish=True,
+            polish_refine_iter=50,
             # sigma=1.0,
             # alpha=1.9,
             # sigma=100,  # er, int values messes things up?
