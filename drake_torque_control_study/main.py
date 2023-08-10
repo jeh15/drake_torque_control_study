@@ -46,6 +46,8 @@ from drake_torque_control_study.misc import (
     unzip,
 )
 
+from parallel_controller import ParallelController
+
 CONTROL_DT = 0.002
 # CONTROL_DT = 0.01
 DISCRETE_PLANT_TIME_STEP = 0.0008
@@ -74,8 +76,9 @@ def run_control(
     #     builder, plant_diagram, plant, CONTROL_DT
     # )
 
+    control_driver = make_controller(plant, frame_W, frame_G)
     controller = builder.AddSystem(
-        make_controller(plant, frame_W, frame_G)
+        control_driver
     )
     builder.Connect(
         access.state_output_port,
@@ -109,6 +112,9 @@ def run_control(
     diagram_context = diagram.CreateDefaultContext()
     context = access.read_plant_context(diagram_context)
 
+    # Initialize controller: (ONLY FOR PARALLEL)
+    controller.preprocess()
+
     plant.SetPositions(context, q0)
 
     X_WG = plant.CalcRelativeTransform(context, frame_W, frame_G)
@@ -125,6 +131,7 @@ def run_control(
     # ApplySimulatorConfig(config, simulator)
     simulator_initialize_repeatedly(simulator)
     simulator.set_target_realtime_rate(1.0)
+
 
     def continuous_monitor(_):
         controller.should_save = True
@@ -374,6 +381,20 @@ def make_controller_qp_constraints(plant, frame_W, frame_G):
     return controller
 
 
+def make_parallel_controller(plant, frame_W, frame_G):
+    controller = ParallelController(
+        plant,
+        frame_W,
+        frame_G,
+        gains=make_osc_gains(),
+        plant_limits=make_panda_limits(plant),
+        acceleration_bounds_dt=CONTROL_DT,
+        posture_weight=1.0,
+        use_torque_weights=True,
+    )
+    return controller
+
+
 def load_teleop_traj(*, as_spline=True):
     data = load_pickle("./data/osc_wrap_sim_panda.pkl")
     tape = data.tape
@@ -438,7 +459,8 @@ def scenario_main():
         # "acc": make_controller_resolved_acc,
         # "osc": make_controller_osc,
         # "qp costs": make_controller_qp_costs,
-        "qp constr": make_controller_qp_constraints,
+        # "qp constr": make_controller_qp_constraints,
+        "parallel": make_parallel_controller,
     }
     for scenario_name, scenario in scenarios.items():
         print(scenario_name)

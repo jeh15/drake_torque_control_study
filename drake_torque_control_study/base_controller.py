@@ -1,3 +1,10 @@
+from pydrake.systems.framework import LeafSystem
+
+from drake_torque_control_study.limits import PlantLimits
+from drake_torque_control_study.systems import declare_simple_init
+
+import controller_utilities
+
 class BaseController(LeafSystem):
     def __init__(self, plant, frame_W, frame_G):
         super().__init__()
@@ -42,7 +49,7 @@ class BaseController(LeafSystem):
 
         init = self.get_init_state(sys_context)
         q0 = init.q
-        pose_actual = calc_spatial_values(
+        pose_actual = controller_utilities.calc_spatial_values(
             self.plant, self.context, self.frame_W, self.frame_G
         )
         pose_desired = self.traj(t)
