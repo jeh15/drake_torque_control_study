@@ -1,8 +1,16 @@
+import functools
+from typing import Tuple, List
+
 import numpy as np
+import jax
+import jax.numpy as jnp
 
 # Custom imports:
 import controller_utilities
 import geometry_utilities
+
+Pair = Tuple[jax.typing.ArrayLike, jax.typing.ArrayLike]
+Limits = List[Pair]
 
 
 def calc_control(self, t, pose_actual, pose_desired, q0):
@@ -181,96 +189,175 @@ def calc_control(self, t, pose_actual, pose_desired, q0):
     return tau
 
 
-def constraints():
-     # Primary, scale: (Acting on optimization variables)
-    u_vars = scale_vars_t
-    Au = proj_task @ np.diag(edd_t_c) @ scale_A_t
-    bu = -proj_task @ Jtdot_v + H
+@functools.partial(
+    jax.jit,
+    static_argnames=["dt", "q_scale", "v_scale"],
+)
+def constraints(
+    q: jax.Array,
+    v: jax.Array,
+    task_projection: jax.Array,
+    postural_projection: jax.Array,
+    desired_task_acceleration: jax.Array,
+    desired_postural_acceleration: jax.Array,
+    task_subspace: jax.Array,
+    postural_subspace: jax.Array,
+    mass_matrix_inverse: jax.Array,
+    bias_term: jax.Array,
+    J_task_dv: jax.Array,
+    limits: Limits,
+    dt: float,
+    q_scale: float = 20.0,
+    v_scale: float = 10.0,
+) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    # Unpack Limits:
+    q_min, q_max = limits['q']
+    v_min, v_max = limits['v']
+    vd_min, vd_max = limits['acceleration']
+    u_min, u_max = limits['control']
 
-    # Secondary, scale: (Acting on optimization variables)
-    Au_p = proj_p @ np.diag(edd_p_c) @ scale_A_p
-    u_vars = np.concatenate([u_vars, scale_vars_p])
-    Au = np.hstack([Au, Au_p])
+    # Task Constraint Matrix:
+    A_task = task_projection @ jnp.diag(desired_task_acceleration) @ task_subspace
+    b = -task_projection @ J_task_dv + bias_term
 
-    # Acceleration is just affine transform.
-    vd_vars = u_vars
-    Avd = Minv @ Au
-    bvd = Minv @ (bu - H)
+    # Posture Constraint Matrix:
+    A_posture = postural_projection @ jnp.diag(desired_postural_acceleration) @ postural_subspace
 
-    q_min, q_max = plant_limits.q
-    v_min, v_max = plant_limits.v
+    # Combine:
+    A_combined = jnp.hstack([A_task, A_posture])
 
-    num_v = len(v)
-    Iv = np.eye(num_v)
+    # Acceleration Constraints:
+    A_acceleration = mass_matrix_inverse @ A_combined
+    b_acceleration = mass_matrix_inverse @ (b - bias_term)
 
-    # CBF formulation.
-    # Goal: h >= 0 for all admissible states
-    # hdd = c*vd >= -k_1*h -k_2*hd = b
-
-    # Gains corresponding to naive formulation.
-    aq_1 = lambda x: x
-    aq_2 = aq_1
-    av_1 = lambda x: x
-    kq_1 = 2 / (dt * dt)
+    # CBF Constraints:
+    kq_1 = 2 / (dt ** 2)
     kq_2 = 2 / dt
     kv_1 = 1 / dt
-
-    q_dt_scale = 20
-    v_dt_scale = 10
-    kq_1 /= q_dt_scale**2
-    kq_2 /= v_dt_scale
-    kv_1 /= v_dt_scale
+    kq_1 /= (q_scale ** 2)
+    kq_2 /= v_scale
+    kv_1 /= v_scale
+    calculate_b_q = lambda x, y: -kq_1 * x - kq_2 * y
+    calculate_b_v = lambda x: -kv_1 * x
 
     # q_min
     h_q_min = q - q_min
     hd_q_min = v
-    c_q_min = 1
-    b_q_min = -kq_1 * aq_1(h_q_min) - kq_2 * aq_2(hd_q_min)
+    b_q_min = calculate_b_q(h_q_min, hd_q_min)
+
     # q_max
     h_q_max = q_max - q
     hd_q_max = -v
-    c_q_max = -1
-    b_q_max = -kq_1 * aq_1(h_q_max) - kq_2 * aq_2(hd_q_max)
+    b_q_max = calculate_b_q(h_q_max, hd_q_max)
+
     # v_min
     h_v_min = v - v_min
-    c_v_min = 1
-    b_v_min = -kv_1 * av_1(h_v_min)
+    b_v_min = calculate_b_v(h_v_min)
+
     # v_max
     h_v_max = v_max - v
-    c_v_max = -1
-    b_v_max = -kv_1 * av_1(h_v_max)
+    b_v_max = calculate_b_v(h_v_max)
 
-    # Add constraints.
-    # N.B. Nominal CBFs (c*vd >= b) are lower bounds. For CBFs where c=-1,
-    # we can pose those as upper bounds (vd <= -b).
-    prog.AddLinearConstraint(
-        Avd,
-        b_q_min - bvd,
-        -b_q_max - bvd,
-        vd_vars,
-    ).evaluator().set_description("pos cbf")
-    prog.AddLinearConstraint(
-        Avd,
-        b_v_min - bvd,
-        -b_v_max - bvd,
-        vd_vars,
-    ).evaluator().set_description("vel cbf")
+    A = jnp.vstack(
+        [A_acceleration, A_acceleration, A_acceleration, A_combined],
+    )
+    l = jnp.concatenate([
+        b_q_min - b_acceleration,
+        b_v_min - b_acceleration,
+        vd_min - b_acceleration,
+        u_min - b,
+    ])
+    u = jnp.concatenate([
+        -b_q_max - b_acceleration,
+        -b_v_max - b_acceleration,
+        vd_max - b_acceleration,
+        u_max - b,
+    ])
+    return A, l, u
 
-    if vd_limits.any_finite():
-        vd_min, vd_max = vd_limits
-        prog.AddLinearConstraint(
-            Avd,
-            vd_min - bvd,
-            vd_max - bvd,
-            vd_vars,
-        ).evaluator().set_description("accel")
 
-    # - Torque.
-    if u_vars is not None and plant_limits.u.any_finite():
-        u_min, u_max = plant_limits.u
-        prog.AddLinearConstraint(
-            Au,
-            u_min - bu,
-            u_max - bu,
-            u_vars,
-        ).evaluator().set_description("torque")
+@functools.partial(
+    jax.jit,
+    static_argnames=[
+        "posture_weight", "num_scales_task", "num_scales_posture"
+    ],
+)
+def objective(
+    desired_scales_task: jax.Array,
+    desired_scales_posture: jax.Array,
+    posture_weight: float,
+    num_scales_task: int,
+    num_scales_posture: int,
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    # Calculate Objective Function:
+    Q_task, c_task = controller_utilities.calculate_quadratic_cost(
+        jnp.ones(num_scales_task),
+        desired_scales_task,
+    )
+    Q_posture, c_posture = controller_utilities.calculate_quadratic_cost(
+        posture_weight * jnp.ones(num_scales_posture),
+        posture_weight * desired_scales_posture,
+    )
+    # Combine:
+    Q = jnp.block([
+        [Q_task, jnp.zeros((num_scales_task, num_scales_posture))],
+        [jnp.zeros((num_scales_posture, num_scales_task)), Q_posture],
+    ])
+    c = jnp.concatenate([c_task, c_posture])
+    return Q, c
+
+
+def test_constraints():
+    # Dummy Inputs:
+    dummy_q = np.zeros(7)
+    dummy_v = np.zeros(7)
+
+    dummy_task_projection = np.zeros((7, 6))
+    dummy_postural_projection = np.zeros((7, 7))
+
+    desired_task_acceleration = np.zeros((6,))
+    desired_postural_acceleration = np.zeros((7,))
+
+    task_subsapce = np.array([
+        [1, 1, 1, 0, 0, 0],
+        [0, 0, 0, 1, 1, 1],
+    ]).T
+    postural_subspace = np.ones((7, 1))
+
+    mass_matrix_inverse = np.eye(7)
+    bias_term = np.zeros((7,))
+
+    J_task_dv = np.zeros((6,))
+
+    dt = 0.02
+    limits = {
+        "q": (jnp.zeros((7,)), jnp.zeros((7,))),
+        "v": (jnp.zeros((7,)), jnp.zeros((7,))),
+        "acceleration": (jnp.zeros((7,)), jnp.zeros((7,))),
+        "control": (jnp.zeros((7,)), jnp.zeros((7,))),
+    }
+
+    # Run:
+    A, l, u = constraints(
+        dummy_q,
+        dummy_v,
+        dummy_task_projection,
+        dummy_postural_projection,
+        desired_task_acceleration,
+        desired_postural_acceleration,
+        task_subsapce,
+        postural_subspace,
+        mass_matrix_inverse,
+        bias_term,
+        J_task_dv,
+        limits,
+        dt,
+    )
+
+
+def main():
+    test_constraints()
+
+
+if __name__ == "__main__":
+    main()

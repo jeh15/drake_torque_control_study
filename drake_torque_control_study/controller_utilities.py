@@ -1,7 +1,8 @@
 from typing import Tuple
 
 import numpy as np
-
+import jax
+import jax.numpy as jnp
 
 def calculate_dynamics(
         plant,
@@ -135,8 +136,8 @@ def add_plant_limits_to_qp(
         ).evaluator().set_description("torque")
 
 
-def add_2norm_decoupled(prog, a, b, x):
-    Q = 2 * np.diag(a * a)
-    b = -2 * a * b
-    c = np.sum(b * b)
-    return prog.AddQuadraticCost(Q, b, c, x)
+@jax.jit
+def calculate_quadratic_cost(a: jax.Array, b: jax.Array):
+    Q = 2 * jnp.diag(a * a)
+    c = -2 * a * b
+    return Q, c
