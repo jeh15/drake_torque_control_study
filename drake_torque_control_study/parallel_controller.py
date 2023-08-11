@@ -186,13 +186,13 @@ class ParallelController(BaseController):
             jit=True,
         )
 
-        sol, state = jax.jit(qp.run)(
+        sol, state = qp.run(
             params_obj=(Q, c),
             params_eq=A,
             params_ineq=(lb, ub),
         )
 
-        print(f"Optimization Status: {state.status}")
+        # print(f"Optimization Status: {state.status}")
 
         task_scales = sol.primal[0][:self.num_scales_task]
         postural_scales = sol.primal[0][self.num_scales_task:]
@@ -204,7 +204,7 @@ class ParallelController(BaseController):
         tau = A_control @ control_multiplier + b_control
         tau = self.plant_limits.u.saturate(tau)
 
-        print(f"Control: {tau}")
+        # print(f"Control: {tau}")
 
         def save_data():
             edd_c_p_null = mass_matrix_inverse @ task_nullspace_transpose @ mass_matrix @ desired_postural_acceleration
