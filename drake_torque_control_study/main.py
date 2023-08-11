@@ -132,7 +132,6 @@ def run_control(
     simulator_initialize_repeatedly(simulator)
     simulator.set_target_realtime_rate(1.0)
 
-
     def continuous_monitor(_):
         controller.should_save = True
         assert torques_output.get_system() is controller
@@ -147,7 +146,7 @@ def run_control(
         controller.should_save = True
 
     m.SHOULD_STOP = True
-    do_plot = False
+    do_plot = True
 
     try:
         # Run a bit past the end of trajectory.

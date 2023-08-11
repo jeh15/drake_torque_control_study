@@ -5,6 +5,7 @@ from drake_torque_control_study.systems import declare_simple_init
 
 import controller_utilities
 
+
 class BaseController(LeafSystem):
     def __init__(self, plant, frame_W, frame_G):
         super().__init__()
