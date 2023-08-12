@@ -1,4 +1,4 @@
-import time
+from typing import Union
 
 import numpy as np
 import jax
@@ -12,6 +12,8 @@ import controller_utilities
 import geometry_utilities
 from base_controller import BaseController
 import plot_utilities
+
+import time
 
 jax.config.update("jax_enable_x64", True)
 dtype = jnp.float64
@@ -75,13 +77,22 @@ class ParallelController(BaseController):
             (self.plant.num_velocities(), 1), dtype=dtype,
         )
         self.num_scales_posture = self.postural_subspace.shape[1]
-        self.limits_q = (jnp.asarray(self.plant_limits.q.lower), jnp.asarray(self.plant_limits.q.upper))
-        self.limits_v = (jnp.asarray(self.plant_limits.v.lower), jnp.asarray(self.plant_limits.v.upper))
-        self.limits_acceleration = (jnp.asarray(self.plant_limits.vd.lower), jnp.asarray(self.plant_limits.vd.upper))
-        self.limits_control = (jnp.asarray(self.plant_limits.u.lower), jnp.asarray(self.plant_limits.u.upper))
+        self.limits_q = (
+            jnp.asarray(self.plant_limits.q.lower), jnp.asarray(self.plant_limits.q.upper)
+        )
+        self.limits_v = (
+            jnp.asarray(self.plant_limits.v.lower), jnp.asarray(self.plant_limits.v.upper)
+        )
+        self.limits_acceleration = (
+            jnp.asarray(self.plant_limits.vd.lower), jnp.asarray(self.plant_limits.vd.upper)
+        )
+        self.limits_control = (
+            jnp.asarray(self.plant_limits.u.lower), jnp.asarray(self.plant_limits.u.upper)
+        )
         self.q_scale = 20.0
         self.v_scale = 10.0
-
+        self.desired_task_scales = jnp.ones(self.num_scales_task)
+        self.desired_postural_scales = jnp.ones(self.num_scales_posture)
         self.qp = BoxOSQP(
             check_primal_dual_infeasability=False,
             momentum=1.6,
@@ -142,7 +153,7 @@ class ParallelController(BaseController):
         bias_term = coriolis_terms - tau_g
 
         # Unpack:
-        X, V, task_jacobian, task_jacobian_dv = pose_actual
+        pose, velocity, task_jacobian, task_jacobian_dv = pose_actual
         packed_output = controller_utilities.reproject_mass(
             mass_matrix_inverse, task_jacobian,
         )
@@ -152,20 +163,28 @@ class ParallelController(BaseController):
 
         # Compute spatial feedback:
         kp_t, kd_t = self.gains.task
-        X_des, V_des, A_des = pose_desired
-        V_des = V_des.get_coeffs()
-        A_des = A_des.get_coeffs()
-        e_t = geometry_utilities.se3_vector_minus(X, X_des)
-        ed_t = V - V_des
-        desired_task_acceleration = A_des - kp_t * e_t - kd_t * ed_t
+        desired_pose, desired_velocity, desired_acceleration = pose_desired
+        desired_velocity = desired_velocity.get_coeffs()
+        desired_acceleration = desired_acceleration.get_coeffs()
+        task_pose_error = geometry_utilities.se3_vector_minus(
+            pose, desired_pose,
+        )
+        task_velocity_error = velocity - desired_velocity
+        desired_task_acceleration = (
+            desired_acceleration - kp_t * task_pose_error - kd_t * task_velocity_error
+        )
 
         # Compute posture feedback:
         kp_p, kd_p = self.gains.posture
-        e_p = q - q0
-        e_p_dir = controller_utilities.vec_dot_norm(e_p, task_nullspace @ e_p)
-        e_p *= e_p_dir
-        ed_p = v
-        desired_postural_acceleration = -kp_p * e_p - kd_p * ed_p
+        postural_pose_error = q - q0
+        postural_pose_scale = controller_utilities.vec_dot_norm(
+            postural_pose_error, task_nullspace @ postural_pose_error,
+        )
+        postural_pose_error *= postural_pose_scale
+        postural_velocity_error = v
+        desired_postural_acceleration = (
+            -kp_p * postural_pose_error - kd_p * postural_velocity_error
+        )
 
         task_projection = task_jacobian.T @ mass_task_projection
         postural_projection = task_nullspace_transpose @ mass_matrix
@@ -236,6 +255,164 @@ class ParallelController(BaseController):
             save_data()
 
         return tau
+
+    # # Keep name the same
+    # def calc_control(
+    #     self,
+    #     t,
+    #     pose_actual,
+    #     pose_desired,
+    #     q0,
+    # ):
+    #     def func(
+    #         q: jax.Array,
+    #         v: jax.Array,
+    #         mass_matrix: jax.Array,
+    #         coriolis_terms: jax.Array,
+    #         tau_g: jax.Array,
+    #         task_pose_error: jax.Array,
+    #         velocity: jax.Array,
+    #         desired_velocity: jax.Array,
+    #         desired_acceleration: jax.Array,
+    #         task_jacobian: jax.Array,
+    #         task_jacobian_dv: jax.Array,
+    #         desired_task_scales: jax.Array,
+    #         desired_postural_scales: jax.Array,
+    #         previous_solution: Union[None, jax.Array],
+    #         kp_task: float,
+    #         kd_task: float,
+    #         kp_posture: float,
+    #         kd_posture: float,
+    #         identity: jax.Array,
+    #     ):
+    #         # Calculate Dynamics:
+    #         mass_matrix_inverse = jnp.linalg.inv(mass_matrix)
+    #         bias_term = coriolis_terms - tau_g
+
+    #         # Reproject Mass:
+    #         packed_output = controller_utilities.jax_reproject_mass(
+    #             mass_matrix_inverse, task_jacobian, identity,
+    #         )
+    #         mass_task_projection, task_jacobian, task_nullspace_transpose = packed_output
+    #         task_nullspace = task_nullspace_transpose.T
+
+    #         # Task Feedback:
+    #         task_velocity_error = velocity - desired_velocity
+    #         desired_task_acceleration = (
+    #             desired_acceleration - kp_task * task_pose_error - kd_task * task_velocity_error
+    #         )
+
+    #         # Posture Feedback:
+    #         postural_pose_error = q - q0
+    #         postural_pose_error_scale = controller_utilities.jax_vec_dot_norm(
+    #             postural_pose_error, task_nullspace @ postural_pose_error,
+    #         )
+    #         postural_pose_error *= postural_pose_error_scale
+    #         postural_velocity_error = v
+    #         desired_postural_acceleration = (
+    #             -kp_posture * postural_pose_error - kd_posture * postural_velocity_error
+    #         )
+
+    #         #
+    #         task_projection = task_jacobian.T @ mass_task_projection
+    #         postural_projection = task_nullspace_transpose @ mass_matrix
+
+    #         # Compute Constraints:
+    #         qp_constraints, control_constraints = self.constraint_function(
+    #             q,
+    #             v,
+    #             task_projection,
+    #             postural_projection,
+    #             desired_task_acceleration,
+    #             desired_postural_acceleration,
+    #             mass_matrix_inverse,
+    #             bias_term,
+    #             task_jacobian_dv,
+    #         )
+
+    #         Q, c = self.objective_function(
+    #             desired_task_scales,
+    #             desired_postural_scales,
+    #         )
+
+    #         # BUILD PROGRAM:
+    #         A, lb, ub = qp_constraints
+    #         A_control, b_control = control_constraints
+
+    #         sol, state = self.qp.run(
+    #             init_params=previous_solution,
+    #             params_obj=(Q, c),
+    #             params_eq=A,
+    #             params_ineq=(lb, ub),
+    #         )
+
+    #         task_scales = sol.primal[0][:self.num_scales_task]
+    #         postural_scales = sol.primal[0][self.num_scales_task:]
+
+    #         control_multiplier = jnp.concatenate([task_scales, postural_scales])
+
+    #         tau = A_control @ control_multiplier + b_control
+
+    #         return tau, sol, state
+
+    #     # Start Timer:
+    #     start_time = time.time()
+
+    #     # Positions and Velocities:
+    #     q = self.plant.GetPositions(self.context)
+    #     v = self.plant.GetVelocities(self.context)
+
+    #     # Calculate Dynamics:
+    #     mass_matrix, coriolis_terms, tau_g = controller_utilities.calculate_dynamics(
+    #         self.plant, self.context,
+    #     )
+
+    #     # Unpack inputs and gains:
+    #     kp_task, kd_task = self.gains.task
+    #     kp_posture, kd_posture = self.gains.posture
+    #     pose, velocity, task_jacobian, task_jacobian_dv = pose_actual
+    #     desired_pose, desired_velocity, desired_acceleration = pose_desired
+    #     desired_velocity = desired_velocity.get_coeffs()
+    #     desired_acceleration = desired_acceleration.get_coeffs()
+    #     task_pose_error = geometry_utilities.se3_vector_minus(
+    #         pose, desired_pose,
+    #     )
+    #     identity = jnp.eye(task_jacobian.shape[-1])
+
+    #     tau, solution, state = jax.jit(func)(
+    #         q,
+    #         v,
+    #         mass_matrix,
+    #         coriolis_terms,
+    #         tau_g,
+    #         task_pose_error,
+    #         velocity,
+    #         desired_velocity,
+    #         desired_acceleration,
+    #         task_jacobian,
+    #         task_jacobian_dv,
+    #         self.desired_task_scales,
+    #         self.desired_postural_scales,
+    #         self.prev_sol,
+    #         kp_task,
+    #         kd_task,
+    #         kp_posture,
+    #         kd_posture,
+    #         identity,
+    #     )
+
+    #     # Warm Start:
+    #     if state.status == 1:
+    #         self.prev_sol = solution
+    #     else:
+    #         self.prev_sol = None
+
+    #     tau = self.plant_limits.u.saturate(tau)
+
+    #     elapsed_time = time.time() - start_time
+    #     print(f"Optimization Status: {state.status} \t Control: {tau} \t Time: {elapsed_time}")
+
+    #     return tau
 
     def show_plots(self):
         ts = np.array(self.ts)

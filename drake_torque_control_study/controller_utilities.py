@@ -1,4 +1,5 @@
 from typing import Tuple
+import functools
 
 import numpy as np
 import jax
@@ -46,6 +47,26 @@ def reproject_mass(M_inv, J_task):
     return (M_task, M_task_inv, J_task, J_taskbar, N_task_transpose)
 
 
+def jax_reproject_mass(
+    mass_matrix_inverse: jax.Array,
+    task_jacobian: jax.Array,
+    identity: int,
+) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    # Maps from task forces to task accelerations.
+    mass_task_projection_inverse = task_jacobian @ mass_matrix_inverse @ task_jacobian.T
+
+    # Maps from task accelerations to task forces.
+    mass_task_projection = jnp.linalg.inv(mass_task_projection_inverse)
+
+    # Maps from task accelerations to generalized accelerations.
+    # Transpose maps from generalized forces to task forces.
+    task_jacobian_bar = mass_matrix_inverse @ task_jacobian.T @ mass_task_projection
+
+    # Generalized force nullspace.
+    task_nullspace_transpose = identity - task_jacobian.T @ task_jacobian_bar.T
+    return (mass_task_projection, task_jacobian, task_nullspace_transpose)
+
+
 def vec_dot_norm(a, b, *, tol=1e-8):
     n = np.linalg.norm(a) * np.linalg.norm(b)
     if n <= tol:
@@ -53,6 +74,11 @@ def vec_dot_norm(a, b, *, tol=1e-8):
     else:
         # arcos of this value gives angle.
         return a.dot(b) / n
+
+
+def jax_vec_dot_norm(a: jax.Array, b: jax.Array, tol: float = 1e-8):
+    n = jnp.linalg.norm(a) * jnp.linalg.norm(b)
+    return jnp.where(n <= tol, 0.0, a.dot(b) / n)
 
 
 @jax.jit
