@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -13,6 +15,9 @@ import plot_utilities
 
 jax.config.update("jax_enable_x64", True)
 dtype = jnp.float64
+
+from jax.lib import xla_bridge
+print(xla_bridge.get_backend().platform)
 
 
 class ParallelController(BaseController):
@@ -77,6 +82,21 @@ class ParallelController(BaseController):
         self.q_scale = 20.0
         self.v_scale = 10.0
 
+        self.qp = BoxOSQP(
+            check_primal_dual_infeasability=False,
+            momentum=1.6,
+            rho_start=1e-6,
+            primal_infeasible_tol=1e-8,
+            dual_infeasible_tol=1e-8,
+            maxiter=200,
+            tol=1e-5,
+            termination_check_frequency=5,
+            verbose=0,
+            implicit_diff=False,
+            jit=True,
+            unroll=True,
+        )
+
     def preprocess(self):
         # Isolate Functions:
         self.constraint_function = lambda x, y, z, i, j, k, l, m, n: optimization_utilities.calculate_constraints(
@@ -107,6 +127,9 @@ class ParallelController(BaseController):
         pose_desired,
         q0,
     ):
+        # Start Timer:
+        start_time = time.time()
+
         # Positions and Velocities:
         q = self.plant.GetPositions(self.context)
         v = self.plant.GetVelocities(self.context)
@@ -172,39 +195,26 @@ class ParallelController(BaseController):
         A, lb, ub = qp_constraints
         A_control, b_control = control_constraints
 
-        qp = BoxOSQP(
-            check_primal_dual_infeasability=False,
-            momentum=1.6,
-            rho_start=1e-6,
-            primal_infeasible_tol=1e-8,
-            dual_infeasible_tol=1e-8,
-            maxiter=500,
-            tol=1e-5,
-            termination_check_frequency=25,
-            verbose=0,
-            implicit_diff=False,
-            jit=True,
-        )
-
-        sol, state = qp.run(
+        sol, state = self.qp.run(
+            init_params=self.prev_sol,
             params_obj=(Q, c),
             params_eq=A,
             params_ineq=(lb, ub),
         )
 
-        # print(f"Optimization Status: {state.status}")
-
         task_scales = sol.primal[0][:self.num_scales_task]
         postural_scales = sol.primal[0][self.num_scales_task:]
 
-        self.prev_sol = sol.primal
+        self.prev_sol = sol
+        self.prev_status = state.status
 
         control_multiplier = np.concatenate([task_scales, postural_scales])
 
         tau = A_control @ control_multiplier + b_control
         tau = self.plant_limits.u.saturate(tau)
 
-        # print(f"Control: {tau}")
+        elapsed_time = time.time() - start_time
+        print(f"Optimization Status: {state.status} \t Control: {tau} \t Time: {elapsed_time}")
 
         def save_data():
             edd_c_p_null = mass_matrix_inverse @ task_nullspace_transpose @ mass_matrix @ desired_postural_acceleration

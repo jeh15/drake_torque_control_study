@@ -166,27 +166,28 @@ def test_constraints():
     J_task_dv = np.zeros((6,))
 
     dt = 0.02
-    limits = {
-        "q": (jnp.zeros((7,)), jnp.zeros((7,))),
-        "v": (jnp.zeros((7,)), jnp.zeros((7,))),
-        "acceleration": (jnp.zeros((7,)), jnp.zeros((7,))),
-        "control": (jnp.zeros((7,)), jnp.zeros((7,))),
-    }
+    q_limits = (jnp.zeros((7,)), jnp.zeros((7,)))
+    v_limits = (jnp.zeros((7,)), jnp.zeros((7,)))
+    acceleration_limits = (jnp.zeros((7,)), jnp.zeros((7,)))
+    control_limits = (jnp.zeros((7,)), jnp.zeros((7,)))
 
     # Run:
-    A, l, u = calculate_constraints(
+    (A, l, u), (A_control, b_control) = calculate_constraints(
         dummy_q,
         dummy_v,
         dummy_task_projection,
         dummy_postural_projection,
         desired_task_acceleration,
         desired_postural_acceleration,
-        task_subsapce,
-        postural_subspace,
         mass_matrix_inverse,
         bias_term,
         J_task_dv,
-        limits,
+        q_limits,
+        v_limits,
+        acceleration_limits,
+        control_limits,
+        task_subsapce,
+        postural_subspace,
         dt,
     )
 

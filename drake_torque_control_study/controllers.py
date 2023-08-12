@@ -1,5 +1,6 @@
 import dataclasses as dc
 from textwrap import indent
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -969,7 +970,13 @@ class QpWithDirConstraint(BaseController):
         self.prev_dir = None
         self.Jmu_prev = None
 
+    def preprocess(self):
+        pass
+
     def calc_control(self, t, pose_actual, pose_desired, q0):
+        # Start time:
+        start_time = time.time()
+
         q = self.plant.GetPositions(self.context)
         v = self.plant.GetVelocities(self.context)
         num_v = len(v)
@@ -1452,6 +1459,9 @@ class QpWithDirConstraint(BaseController):
 
         edd_c_p_null = Minv @ Nt_T @ M @ edd_p_c
         _, sigmas, _ = np.linalg.svd(Jt)
+
+        elapsed_time = time.time() - start_time
+        print(f"Optimization Status: {result.is_success()} \t Control: {tau} \t Time: {elapsed_time}")
 
         if self.should_save:
             self.ts.append(t)
