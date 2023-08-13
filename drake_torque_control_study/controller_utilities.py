@@ -50,7 +50,7 @@ def reproject_mass(M_inv, J_task):
 def jax_reproject_mass(
     mass_matrix_inverse: jax.Array,
     task_jacobian: jax.Array,
-    identity: int,
+    identity: jax.Array,
 ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     # Maps from task forces to task accelerations.
     mass_task_projection_inverse = task_jacobian @ mass_matrix_inverse @ task_jacobian.T
