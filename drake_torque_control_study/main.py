@@ -143,16 +143,23 @@ def run_control(
         simulator.set_monitor(continuous_monitor)
     else:
         # ZOH means each step is actual step.
-        controller.should_save = True
+        controller.should_save = False
 
     m.SHOULD_STOP = True
-    do_plot = True
+    do_plot = False
+    end_time = 1.25
 
     try:
         # Run a bit past the end of trajectory.
-        simulator.AdvanceTo(t_f)
-        # simulator.AdvanceTo(1.25)
-        # simulator.AdvanceTo(1.5)  # HACK
+        # simulator.AdvanceTo(t_f)
+        # simulator.AdvancePendingEvents()
+        current_time = 0.0
+        target_time = control_dt
+        while current_time <= end_time:
+            simulator.AdvanceTo(target_time)
+            current_time = context.get_time()
+            target_time = current_time + control_dt
+
         simulator.AdvancePendingEvents()
     except (Exception, KeyboardInterrupt) as e:
         err_name = type(e).__name__

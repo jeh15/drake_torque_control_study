@@ -46,6 +46,7 @@ def calculate_constraints(
     q_scale: float = 20.0,
     v_scale: float = 10.0,
 ) -> ConstraintOutput:
+    print("Compiling Constraints")
     # Unpack Limits:
     q_min, q_max = q_limits
     v_min, v_max = v_limits
@@ -97,18 +98,31 @@ def calculate_constraints(
     A = jnp.vstack(
         [A_acceleration, A_acceleration, A_acceleration, A_combined],
     )
+    # A_reduced = jnp.vstack(
+    #     [A_acceleration, A_combined]
+    # )
+    # Matrix conditioner:
+    # A = jnp.where(jnp.abs(A) <= 1e-3, 0.0, A)
     l = jnp.concatenate([
         b_q_min - b_acceleration,
         b_v_min - b_acceleration,
         vd_min - b_acceleration,
         u_min - b,
     ])
+    # l_reduced = jnp.concatenate([
+    #     vd_min - b_acceleration,
+    #     u_min - b,
+    # ])
     u = jnp.concatenate([
         -b_q_max - b_acceleration,
         -b_v_max - b_acceleration,
         vd_max - b_acceleration,
         u_max - b,
     ])
+    # u_reduced = jnp.concatenate([
+    #     vd_max - b_acceleration,
+    #     u_max - b,
+    # ])
     return (A, l, u), (A_combined, b)
 
 
@@ -125,6 +139,7 @@ def calculate_objective(
     num_scales_task: int,
     num_scales_posture: int,
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    print("Compiling Objective")
     # Calculate Objective Function:
     Q_task, c_task = controller_utilities.calculate_quadratic_cost(
         jnp.ones(num_scales_task),

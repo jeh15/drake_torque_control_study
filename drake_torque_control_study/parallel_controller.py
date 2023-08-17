@@ -1,4 +1,5 @@
 from typing import Union
+import functools
 
 import numpy as np
 import jax
@@ -193,6 +194,7 @@ class ParallelController(BaseController):
         desired_postural_scales = np.ones(self.num_scales_posture)
 
         # Compute Constraints:
+        constraint_start = time.time()
         qp_constraints, control_constraints = self.constraint_function(
             q,
             v,
@@ -204,22 +206,30 @@ class ParallelController(BaseController):
             bias_term,
             task_jacobian_dv,
         )
+        jax.block_until_ready(qp_constraints)
+        constraint_end = time.time() - constraint_start
 
+        objective_start = time.time()
         Q, c = self.objective_function(
             desired_task_scales,
             desired_postural_scales,
         )
+        jax.block_until_ready(Q)
+        objective_end = time.time() - objective_start
 
         # BUILD PROGRAM:
         A, lb, ub = qp_constraints
         A_control, b_control = control_constraints
 
+        qp_start = time.time()
         sol, state = self.qp.run(
             init_params=self.prev_sol,
             params_obj=(Q, c),
             params_eq=A,
             params_ineq=(lb, ub),
         )
+        jax.block_until_ready(sol)
+        qp_end = time.time() - qp_start
 
         task_scales = sol.primal[0][:self.num_scales_task]
         postural_scales = sol.primal[0][self.num_scales_task:]
@@ -233,7 +243,8 @@ class ParallelController(BaseController):
         tau = self.plant_limits.u.saturate(tau)
 
         elapsed_time = time.time() - start_time
-        print(f"Optimization Status: {state.status} \t Control: {tau} \t Time: {elapsed_time}")
+        print(f"Optimization Status: {state.status} \t Control: {tau} \t Time: {elapsed_time:.3f}")
+        print(f"Constraint Time: {constraint_end:.6f} \t Objective Time: {objective_end:.6f} \t QP Time: {qp_end:.3f}")
 
         def save_data():
             edd_c_p_null = mass_matrix_inverse @ task_nullspace_transpose @ mass_matrix @ desired_postural_acceleration
@@ -413,6 +424,16 @@ class ParallelController(BaseController):
     #     print(f"Optimization Status: {state.status} \t Control: {tau} \t Time: {elapsed_time}")
 
     #     return tau
+
+    @functools.partial(jax.vmap, in_axes=(None, 0, 0, 0, 0, 0), out_axes=(0, 0))
+    def vmapped_run(self, Q, c, A, lb, ub):
+        sol, state = self.qp.run(
+            init_params=self.prev_sol,
+            params_obj=(Q, c),
+            params_eq=A,
+            params_ineq=(lb, ub),
+        )
+        return sol, state
 
     def show_plots(self):
         ts = np.array(self.ts)
