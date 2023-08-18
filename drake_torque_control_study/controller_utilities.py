@@ -47,6 +47,7 @@ def reproject_mass(M_inv, J_task):
     return (M_task, M_task_inv, J_task, J_taskbar, N_task_transpose)
 
 
+@jax.jit
 def jax_reproject_mass(
     mass_matrix_inverse: jax.Array,
     task_jacobian: jax.Array,
@@ -76,6 +77,7 @@ def vec_dot_norm(a, b, *, tol=1e-8):
         return a.dot(b) / n
 
 
+@jax.jit
 def jax_vec_dot_norm(a: jax.Array, b: jax.Array, tol: float = 1e-8):
     n = jnp.linalg.norm(a) * jnp.linalg.norm(b)
     return jnp.where(n <= tol, 0.0, a.dot(b) / n)

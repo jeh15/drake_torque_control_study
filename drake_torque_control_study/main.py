@@ -46,9 +46,15 @@ from drake_torque_control_study.misc import (
     unzip,
 )
 
+import time
+import isolated_qp
+import controller_utilities
+import optimization_utilities
 from parallel_controller import ParallelController
+from jaxopt import BoxOSQP
 
 CONTROL_DT = 0.002
+
 # CONTROL_DT = 0.01
 DISCRETE_PLANT_TIME_STEP = 0.0008
 
@@ -151,16 +157,71 @@ def run_control(
 
     try:
         # Run a bit past the end of trajectory.
-        # simulator.AdvanceTo(t_f)
-        # simulator.AdvancePendingEvents()
-        current_time = 0.0
-        target_time = control_dt
-        while current_time <= end_time:
-            simulator.AdvanceTo(target_time)
-            current_time = context.get_time()
-            target_time = current_time + control_dt
-
+        simulator.AdvanceTo(t_f)
         simulator.AdvancePendingEvents()
+        # current_time = 0.0
+        # target_time = control_dt
+        # while current_time <= end_time:
+        #     simulator.AdvanceTo(target_time)
+        #     current_time = context.get_time()
+        #     target_time = current_time + control_dt
+
+        # Exposed Functions:
+        # current_time = control_dt
+        # while current_time <= end_time:
+        #     initial_q = np.asarray(controller.get_init_state(diagram_context).q)
+        #     pose_actual = controller_utilities.calc_spatial_values(
+        #         plant, context, frame_W, frame_G,
+        #     )
+        #     pose_desired = traj(current_time)
+        #     (q, v, mass_matrix, coriolis_terms, tau_g, task_pose_error, velocity, desired_velocity, desired_acceleration, task_jacobian, task_jacobian_dv, kp_task, kd_task, kp_posture, kd_posture, identity) = isolated_qp.get_drake_values(
+        #         plant,
+        #         context,
+        #         pose_actual,
+        #         pose_desired,
+        #         controller.gains,
+        #     )
+        #     desired_task_scales = np.array(controller.desired_task_scales)
+        #     desired_postural_scales = np.array(controller.desired_postural_scales)
+        #     kp_task, kd_task = np.array(kp_task), np.array(kd_task)
+        #     kp_posture, kd_posture = np.array(kp_posture), np.array(kd_posture)
+        #     identity = np.array(identity)
+        #     start_time = time.time()
+        #     tau, sol, state = isolated_qp.calculate_control(
+        #         q,
+        #         v,
+        #         initial_q,
+        #         mass_matrix,
+        #         coriolis_terms,
+        #         tau_g,
+        #         task_pose_error,
+        #         velocity,
+        #         desired_velocity,
+        #         desired_acceleration,
+        #         task_jacobian,
+        #         task_jacobian_dv,
+        #         desired_task_scales,
+        #         desired_postural_scales,
+        #         kp_task,
+        #         kd_task,
+        #         kp_posture,
+        #         kd_posture,
+        #         identity,
+        #         controller.num_scales_task,
+        #         controller.limits_q,
+        #         controller.limits_v,
+        #         controller.limits_acceleration,
+        #         controller.limits_control,
+        #         controller.task_subspace,
+        #         controller.postural_subspace,
+        #         controller.acceleration_bounds_dt,
+        #         controller.q_scale,
+        #         controller.v_scale,
+        #     )
+        #     tau.block_until_ready()
+        #     print(f"Elapsed time: {time.time() - start_time}")
+        #     current_time = context.get_time()
+
     except (Exception, KeyboardInterrupt) as e:
         err_name = type(e).__name__
         print(f"{err_name} at {diagram_context.get_time()}s")
@@ -465,8 +526,8 @@ def scenario_main():
         # "acc": make_controller_resolved_acc,
         # "osc": make_controller_osc,
         # "qp costs": make_controller_qp_costs,
-        # "qp constr": make_controller_qp_constraints,
-        "parallel": make_parallel_controller,
+        "qp constr": make_controller_qp_constraints,
+        # "parallel": make_parallel_controller,
     }
     for scenario_name, scenario in scenarios.items():
         print(scenario_name)

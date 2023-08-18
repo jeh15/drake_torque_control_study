@@ -974,9 +974,6 @@ class QpWithDirConstraint(BaseController):
         pass
 
     def calc_control(self, t, pose_actual, pose_desired, q0):
-        # Start time:
-        start_time = time.time()
-
         q = self.plant.GetPositions(self.context)
         v = self.plant.GetVelocities(self.context)
         num_v = len(v)
@@ -1387,6 +1384,7 @@ class QpWithDirConstraint(BaseController):
         #     print(f"  edd_p_c: {edd_p_c}")
 
         # Solve.
+        start_time = time.time()
         try:
             # TODO(eric.cousineau): OSQP does not currently accept
             # warm-starting:
@@ -1437,7 +1435,7 @@ class QpWithDirConstraint(BaseController):
             relax_p = result.GetSolution(relax_vars_p)
             # print(f"  relax: {relax_p}")
         # print("---")
-        print(f"Optimization Variables: {np.concatenate([scale_t, scale_p])}")
+        # print(f"Optimization Variables: {np.concatenate([scale_t, scale_p])}")
 
         infeas = result.GetInfeasibleConstraintNames(prog, tol=tol)
         infeas_text = "\n" + indent("\n".join(infeas), "  ")
@@ -1462,7 +1460,7 @@ class QpWithDirConstraint(BaseController):
         _, sigmas, _ = np.linalg.svd(Jt)
 
         elapsed_time = time.time() - start_time
-        # print(f"Optimization Status: {result.is_success()} \t Control: {tau} \t Time: {elapsed_time}")
+        print(f"Optimization Status: {result.is_success()} \t Control: {tau} \t Time: {elapsed_time}")
 
         if self.should_save:
             self.ts.append(t)
